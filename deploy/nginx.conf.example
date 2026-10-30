@@ -1,0 +1,9 @@
+# Inside an existing server { } block (HTTPS). Either rely on DASHBOARD_USER/PASSWORD
+# or add nginx basic auth here (htpasswd -c /etc/nginx/.htpasswd-repowatch you).
+location /repowatch/ {
+    # auth_basic "RepoWatch";
+    # auth_basic_user_file /etc/nginx/.htpasswd-repowatch;
+    proxy_pass http://127.0.0.1:8765/;
+    proxy_set_header Host $host;
+    proxy_set_header Authorization $http_authorization;
+}

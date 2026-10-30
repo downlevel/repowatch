@@ -1,0 +1,2 @@
+# Collect once a day at 06:00 (server time)
+0 6 * * * cd /opt/repowatch && .venv/bin/repowatch collect >> /var/log/repowatch.log 2>&1

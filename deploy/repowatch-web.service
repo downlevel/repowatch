@@ -1,0 +1,11 @@
+[Unit]
+Description=RepoWatch dashboard
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/repowatch
+ExecStart=/opt/repowatch/.venv/bin/repowatch serve --host 127.0.0.1 --port 8765
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

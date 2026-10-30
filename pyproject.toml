@@ -1,0 +1,32 @@
+[project]
+name = "repowatch"
+version = "0.1.0"
+description = "Daily history of GitHub stars, traffic, clones, referrers and release downloads for all public repos of an account, with a small self-hosted dashboard."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+repowatch = "repowatch.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["repowatch"]
+
+[tool.setuptools.package-data]
+repowatch = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
