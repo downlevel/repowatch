@@ -86,7 +86,7 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.get("/api/summary")
     def summary(days: int = 7):
-        cutoff = _cutoff(days)
+        cutoff, prev_cutoff = _cutoff(days), _prev_cutoff(days)
         with conn() as c:
             latest_seen = c.execute("SELECT MAX(last_seen) FROM repos").fetchone()[0]
             repos = c.execute(
@@ -98,19 +98,7 @@ def create_app(cfg: Config) -> FastAPI:
                 snap = c.execute(
                     "SELECT * FROM repo_snapshots WHERE repo=? ORDER BY date DESC LIMIT 1", (name,)
                 ).fetchone()
-                stars_new = _stars_delta(c, name, cutoff, snap)
-                dl_total, dl_delta = _downloads(c, name, cutoff)
-                traffic = c.execute(
-                    """
-                    SELECT COALESCE(SUM(views),0) v, COALESCE(SUM(views_uniques),0) vu,
-                           COALESCE(SUM(clones),0) cl, COALESCE(SUM(clones_uniques),0) clu
-                    FROM traffic_daily WHERE repo=? AND date>=?
-                    """,
-                    (name, cutoff),
-                ).fetchone()
-                ci = c.execute(
-                    "SELECT COALESCE(SUM(runs),0) FROM ci_daily WHERE repo=? AND date>=?", (name, cutoff)
-                ).fetchone()[0]
+                cur = _period(c, name, cutoff)
                 top_ref = c.execute(
                     """
                     SELECT referrer, uniques FROM referrers_snapshots
@@ -123,16 +111,6 @@ def create_app(cfg: Config) -> FastAPI:
                     "SELECT tag, published_at, html_url FROM releases WHERE repo=? ORDER BY published_at DESC LIMIT 1",
                     (name,),
                 ).fetchone()
-                external = c.execute(
-                    """
-                    SELECT COUNT(*) FROM activity
-                    WHERE repo=? AND is_owner=0 AND is_bot=0 AND created_at>=?
-                    """,
-                    (name, cutoff),
-                ).fetchone()[0]
-                pypi = c.execute(
-                    "SELECT SUM(downloads) FROM pypi_daily WHERE repo=? AND date>=?", (name, cutoff)
-                ).fetchone()[0]
                 out.append(
                     {
                         "name": name,
@@ -142,21 +120,15 @@ def create_app(cfg: Config) -> FastAPI:
                         "archived": bool(r["archived"]),
                         "pushed_at": r["pushed_at"],
                         "stars": snap["stars"] if snap else None,
-                        "stars_delta": stars_new,
                         "forks": snap["forks"] if snap else None,
                         "watchers": snap["watchers"] if snap else None,
                         "open_issues": snap["open_issues"] if snap else None,
-                        "downloads": dl_total,
-                        "downloads_delta": dl_delta,
-                        "views": traffic["v"],
-                        "views_uniques": traffic["vu"],
-                        "clones": traffic["cl"],
-                        "clones_uniques": traffic["clu"],
-                        "ci_runs": ci,
+                        "downloads": _downloads_total(c, name),
+                        **cur,
+                        # Same metrics over the window just before this one (None for "all time").
+                        "prev": _period(c, name, prev_cutoff, cutoff) if prev_cutoff else None,
                         "top_referrer": dict(top_ref) if top_ref else None,
                         "latest_release": dict(rel) if rel else None,
-                        "external_activity": external,
-                        "pypi_downloads": pypi,
                     }
                 )
         return out
@@ -292,8 +264,14 @@ def create_app(cfg: Config) -> FastAPI:
                 )
             ]
 
+            prev_cutoff = _prev_cutoff(days)
+            period = _period(c, name, cutoff)
+            prev = _period(c, name, prev_cutoff, cutoff) if prev_cutoff else None
+
         return {
             "repo": dict(repo),
+            "period": period,
+            "prev": prev,
             "traffic": series,
             "stars": stars,
             "snapshots": snapshots,
@@ -318,37 +296,99 @@ def _cutoff(days: int) -> str:
     return (date.today() - timedelta(days=days)).isoformat()
 
 
-def _stars_delta(c: sqlite3.Connection, repo: str, cutoff: str, snap: sqlite3.Row | None) -> int:
+def _prev_cutoff(days: int) -> str | None:
+    if days <= 0:
+        return None
+    return (date.today() - timedelta(days=2 * days)).isoformat()
+
+
+def _period(c: sqlite3.Connection, repo: str, start: str, end: str | None = None) -> dict:
+    """Activity in [start, end); end=None means up to now.
+
+    For a closed (past) window a metric is None when tracking began after `start`: a partial
+    window would make the current period look like growth.
+    """
+    past = end is not None
+    hi = end or "9999-99-99"
+
+    traffic_first = c.execute("SELECT MIN(date) FROM traffic_daily WHERE repo=?", (repo,)).fetchone()[0]
+    if past and (traffic_first is None or traffic_first > start):
+        traffic = dict.fromkeys(("views", "views_uniques", "clones", "clones_uniques", "ci_runs"))
+    else:
+        t = c.execute(
+            """
+            SELECT COALESCE(SUM(views),0) views, COALESCE(SUM(views_uniques),0) views_uniques,
+                   COALESCE(SUM(clones),0) clones, COALESCE(SUM(clones_uniques),0) clones_uniques
+            FROM traffic_daily WHERE repo=? AND date>=? AND date<?
+            """,
+            (repo, start, hi),
+        ).fetchone()
+        traffic = dict(t)
+        traffic["ci_runs"] = c.execute(
+            "SELECT COALESCE(SUM(runs),0) FROM ci_daily WHERE repo=? AND date>=? AND date<?", (repo, start, hi)
+        ).fetchone()[0]
+
+    pypi_first = c.execute("SELECT MIN(date) FROM pypi_daily WHERE repo=?", (repo,)).fetchone()[0]
+    pypi = None
+    if pypi_first and not (past and pypi_first > start):
+        pypi = c.execute(
+            "SELECT COALESCE(SUM(downloads),0) FROM pypi_daily WHERE repo=? AND date>=? AND date<?", (repo, start, hi)
+        ).fetchone()[0]
+
+    external = c.execute(
+        """
+        SELECT COUNT(*) FROM activity
+        WHERE repo=? AND is_owner=0 AND is_bot=0 AND created_at>=? AND created_at<?
+        """,
+        (repo, start, hi),
+    ).fetchone()[0]
+
+    return {
+        **traffic,
+        "stars_delta": _stars_delta(c, repo, start, end),
+        "downloads_delta": _downloads_delta(c, repo, start, end),
+        "pypi_downloads": pypi,
+        "external_activity": external,
+    }
+
+
+def _stars_delta(c: sqlite3.Connection, repo: str, start: str, end: str | None = None) -> int | None:
     if c.execute("SELECT 1 FROM stargazers WHERE repo=? LIMIT 1", (repo,)).fetchone():
         return c.execute(
-            "SELECT COUNT(*) FROM stargazers WHERE repo=? AND starred_at>=?", (repo, cutoff)
+            "SELECT COUNT(*) FROM stargazers WHERE repo=? AND starred_at>=? AND starred_at<?",
+            (repo, start, end or "9999-99-99"),
         ).fetchone()[0]
-    if not snap:
-        return 0
-    base = c.execute(
-        "SELECT stars FROM repo_snapshots WHERE repo=? AND date<=? ORDER BY date DESC LIMIT 1", (repo, cutoff)
-    ).fetchone() or c.execute(
-        "SELECT stars FROM repo_snapshots WHERE repo=? ORDER BY date LIMIT 1", (repo,)
-    ).fetchone()
-    return max(0, snap["stars"] - base["stars"])
+    # Stargazers list not accessible: difference of the daily counter.
+    return _counter_delta(c, "SELECT date, stars v FROM repo_snapshots WHERE repo=?", repo, start, end)
 
 
-def _downloads(c: sqlite3.Connection, repo: str, cutoff: str) -> tuple[int | None, int | None]:
-    latest = c.execute(
-        "SELECT MAX(date) FROM release_asset_snapshots WHERE repo=?", (repo,)
+def _downloads_delta(c: sqlite3.Connection, repo: str, start: str, end: str | None = None) -> int | None:
+    return _counter_delta(
+        c, "SELECT date, SUM(download_count) v FROM release_asset_snapshots WHERE repo=? GROUP BY date",
+        repo, start, end,
+    )
+
+
+def _counter_delta(c: sqlite3.Connection, sql: str, repo: str, start: str, end: str | None) -> int | None:
+    """Growth of a cumulative daily counter between the snapshots on/before `start` and `end`."""
+    rows = c.execute(f"SELECT date, v FROM ({sql}) ORDER BY date", (repo,)).fetchall()
+    if not rows:
+        return None
+    at = lambda d: next((r["v"] for r in reversed(rows) if r["date"] <= d), None)  # noqa: E731
+    base = at(start)
+    if base is None:
+        if end is not None:
+            return None
+        base = rows[0]["v"]  # tracking started inside the current window
+    top = rows[-1]["v"] if end is None else at(end)
+    return max(0, (top or 0) - (base or 0))
+
+
+def _downloads_total(c: sqlite3.Connection, repo: str) -> int | None:
+    return c.execute(
+        """
+        SELECT SUM(download_count) FROM release_asset_snapshots
+        WHERE repo=? AND date=(SELECT MAX(date) FROM release_asset_snapshots WHERE repo=?)
+        """,
+        (repo, repo),
     ).fetchone()[0]
-    if not latest:
-        return None, None
-    total = c.execute(
-        "SELECT SUM(download_count) FROM release_asset_snapshots WHERE repo=? AND date=?", (repo, latest)
-    ).fetchone()[0]
-    # Baseline: last snapshot on/before the cutoff, or the first one if tracking started later.
-    base_date = c.execute(
-        "SELECT MAX(date) FROM release_asset_snapshots WHERE repo=? AND date<=?", (repo, cutoff)
-    ).fetchone()[0] or c.execute(
-        "SELECT MIN(date) FROM release_asset_snapshots WHERE repo=?", (repo,)
-    ).fetchone()[0]
-    base = c.execute(
-        "SELECT SUM(download_count) FROM release_asset_snapshots WHERE repo=? AND date=?", (repo, base_date)
-    ).fetchone()[0]
-    return total, total - (base or 0)

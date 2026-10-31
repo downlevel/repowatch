@@ -1,5 +1,5 @@
 import base64
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -32,6 +32,34 @@ def test_summary_and_detail(tmp_path):
     assert detail["stars"] == [{"date": "2026-09-01", "stars": 1}]
     assert client.get("/api/repo/nope").status_code == 404
     assert client.get("/").status_code == 200
+
+
+def test_previous_period(tmp_path):
+    client = make_client(tmp_path)
+    # The fixture only has the last 14 days: no full previous window to compare with yet.
+    prev = client.get("/api/summary?days=7").json()[0]["prev"]
+    assert prev["views_uniques"] is None and prev["downloads_delta"] is None
+    assert client.get("/api/summary?days=0").json()[0]["prev"] is None
+
+    # Backfill older history: 1 unique visitor/day and a release counter growing 10/day.
+    conn = db.connect(tmp_path / "w.db")
+    for back in range(15, 30):
+        d = (date.today() - timedelta(days=back)).isoformat()
+        conn.execute("INSERT INTO traffic_daily (repo, date, views, views_uniques) VALUES ('proj', ?, 2, 1)", (d,))
+        conn.execute(
+            "INSERT INTO release_asset_snapshots VALUES ('proj', ?, 'v1', 'a.tar.gz', ?)", (d, 300 - back * 10)
+        )
+    conn.commit()
+    conn.close()
+
+    # Window [today-14, today-7): the fixture's days 13..8 back, one unique each.
+    assert client.get("/api/summary?days=7").json()[0]["prev"]["views_uniques"] == 6
+    prev = client.get("/api/summary?days=14").json()[0]["prev"]
+    assert prev["views_uniques"] == 14  # backfilled days 28..15 back
+    assert prev["downloads_delta"] == 130  # counter 15 days back (150) minus 28 days back (20)
+    detail = client.get("/api/repo/proj?days=14").json()
+    assert detail["prev"]["views_uniques"] == 14
+    assert detail["period"]["views_uniques"] == 14
 
 
 def test_basic_auth(tmp_path):

@@ -10,7 +10,10 @@
 </head>
 <body>
   <header class="top">
-    <a href="#/" class="brand">RepoWatch <span id="owner"></span></a>
+    <div>
+      <a href="#/" class="brand">RepoWatch<span class="slash">/</span><span id="owner"></span></a>
+      <p id="status" class="meta"></p>
+    </div>
     <div class="period" role="group" aria-label="Period">
       <button data-days="7">7d</button>
       <button data-days="14">14d</button>
@@ -19,7 +22,6 @@
       <button data-days="0">All</button>
     </div>
   </header>
-  <p id="status" class="muted small"></p>
   <main id="view"></main>
   <script src="app.js"></script>
 </body>
