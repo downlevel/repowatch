@@ -149,6 +149,15 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_seen ON events (seen, date);
 
+-- Sections (per repo) collected successfully at least once. Until then a section imports
+-- existing history silently, so a first run that failed or crashed doesn't flood the feed later.
+CREATE TABLE IF NOT EXISTS baselines (
+    repo     TEXT NOT NULL,
+    section  TEXT NOT NULL,
+    done_at  TEXT NOT NULL,
+    PRIMARY KEY (repo, section)
+);
+
 CREATE TABLE IF NOT EXISTS collector_runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at   TEXT NOT NULL,

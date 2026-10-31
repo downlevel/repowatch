@@ -46,9 +46,9 @@ class Collector:
         self.owner = cfg.owner
         self.http = http
         self.errors: list[str] = []
-        # Repos seen for the first time in this run: their existing history is imported
-        # as a baseline, without generating "new star", "new download"... events.
-        self.quiet: set[str] = set()
+        # True while a section that was never collected successfully for this repo runs: its
+        # existing history is imported as a baseline, without "new star", "new download"... events.
+        self.quiet = False
 
     # ------------------------------------------------------------------ run
 
@@ -60,6 +60,7 @@ class Collector:
         self.conn.commit()
 
         repos = self.discover()
+        self._seed_baselines(repos)
         for repo in repos:
             self.collect_repo(repo)
 
@@ -76,7 +77,11 @@ class Collector:
 
     def collect_repo(self, name: str) -> None:
         log.info("collecting %s", name)
-        steps: list[tuple[str, Callable[[str], None]]] = [
+        for section, fn in self._steps(name):
+            self._section(name, section, fn)
+
+    def _steps(self, name: str) -> list[tuple[str, Callable[[str], bool | None]]]:
+        steps: list[tuple[str, Callable[[str], bool | None]]] = [
             ("snapshot", self.collect_snapshot),
             ("stargazers", self.collect_stargazers),
             ("forks", self.collect_forks),
@@ -88,12 +93,14 @@ class Collector:
         ]
         if name in self.cfg.pypi_packages:
             steps.append(("pypi", self.collect_pypi))
-        for section, fn in steps:
-            self._section(name, section, fn)
+        return steps
 
-    def _section(self, repo: str, section: str, fn: Callable[[str], None]) -> None:
+    def _section(self, repo: str, section: str, fn: Callable[[str], bool | None]) -> None:
+        """Run one section; it counts as baselined unless it fails or returns False."""
         try:
-            fn(repo)
+            self.quiet = not self._baselined(repo, section)
+            if fn(repo) is not False:
+                self._mark_baselined(repo, section)
             self.conn.commit()
         except Exception as exc:  # noqa: BLE001 - one failing section must not stop the run
             self.conn.rollback()
@@ -105,11 +112,44 @@ class Collector:
             log.error(msg)
             log.debug(traceback.format_exc())
             self.errors.append(msg)
+        finally:
+            self.quiet = False
+
+    def _baselined(self, repo: str, section: str) -> bool:
+        return bool(
+            self.conn.execute("SELECT 1 FROM baselines WHERE repo=? AND section=?", (repo, section)).fetchone()
+        )
+
+    def _mark_baselined(self, repo: str, section: str) -> None:
+        self.conn.execute(
+            "INSERT OR IGNORE INTO baselines (repo, section, done_at) VALUES (?, ?, ?)", (repo, section, self.now_iso)
+        )
+
+    def _seed_baselines(self, repos: list[str]) -> None:
+        """Databases created before baselines were tracked: a run that finished without errors
+        collected every section of the repos known at the time, so those are baselined."""
+        if self.conn.execute("SELECT 1 FROM baselines LIMIT 1").fetchone():
+            return
+        clean = self.conn.execute(
+            "SELECT MAX(started_at) FROM collector_runs WHERE finished_at IS NOT NULL AND errors=0"
+        ).fetchone()[0]
+        if not clean:
+            return
+        for repo in repos:
+            first = self.conn.execute("SELECT first_seen FROM repos WHERE name=?", (repo,)).fetchone()
+            if first and first[0] <= clean:
+                # A clean run may have used the star-count fallback: the list only counts as
+                # imported if some stargazers were actually stored.
+                listed = self.conn.execute("SELECT 1 FROM stargazers WHERE repo=? LIMIT 1", (repo,)).fetchone()
+                for section in [s for s, _ in self._steps(repo)] + ["star_counts"]:
+                    if section != "stargazers" or listed:
+                        self._mark_baselined(repo, section)
+        self.conn.commit()
 
     def emit(
         self, repo: str, key: str, type_: str, detail: str, url: str | None = None, when: str | None = None
     ) -> None:
-        if repo in self.quiet:
+        if self.quiet:
             return
         add_event(self.conn, key, repo, when or self.now_iso, type_, detail, url)
 
@@ -119,6 +159,7 @@ class Collector:
         db_was_empty = self.conn.execute("SELECT COUNT(*) FROM repos").fetchone()[0] == 0
         known = {r[0] for r in self.conn.execute("SELECT name FROM repos")}
         selected: list[str] = []
+        new = 0
         for r in self.gh.paginate(f"/users/{self.owner}/repos", {"type": "owner", "sort": "full_name"}):
             if r.get("private"):
                 continue
@@ -146,7 +187,7 @@ class Collector:
                 ),
             )
             if name not in known:
-                self.quiet.add(name)
+                new += 1
                 if not db_was_empty:
                     add_event(
                         self.conn, f"repo:{name}", name, self.now_iso, "new_repo",
@@ -154,7 +195,7 @@ class Collector:
                     )
             selected.append(name)
         self.conn.commit()
-        log.info("discovered %d repos (%d new)", len(selected), len(self.quiet))
+        log.info("discovered %d repos (%d new)", len(selected), new)
         return selected
 
     # ----------------------------------------------------------- sections
@@ -190,7 +231,7 @@ class Collector:
                 f"+{delta} watcher{'s' if delta > 1 else ''} on {repo}", f"{r['html_url']}/watchers",
             )
 
-    def collect_stargazers(self, repo: str) -> None:
+    def collect_stargazers(self, repo: str) -> bool | None:
         known = {
             row[0]: row[1]
             for row in self.conn.execute("SELECT user, starred_at FROM stargazers WHERE repo=?", (repo,))
@@ -210,8 +251,12 @@ class Collector:
                     exc,
                 )
                 self.stargazers_denied = True
+            # The counter has its own baseline; the list stays un-baselined, so the first
+            # successful listing (once a token allows it) doesn't report every past stargazer.
+            self.quiet = not self._baselined(repo, "star_counts")
             self._star_count_event(repo)
-            return
+            self._mark_baselined(repo, "star_counts")
+            return False
         for s in stargazers:
             login = s["user"]["login"]
             current.add(login)

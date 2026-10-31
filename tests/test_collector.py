@@ -191,3 +191,45 @@ def test_stargazers_denied_falls_back_to_counts(conn):
     day1 = DAY0 + timedelta(days=1)
     assert Collector(cfg, conn, FakeGitHub(denied(day1, ["bob", "eve", "zoe"])), now=day1).run() == 0
     assert [e["detail"] for e in events(conn)] == ["⭐ +2 stars on proj"]
+
+
+def test_failed_first_collection_is_still_a_baseline(conn):
+    # Day 0: releases and popular fail, so their history isn't imported yet.
+    r = routes(DAY0, downloads=16)
+    r[f"/repos/{OWNER}/proj/releases"] = GitHubError(500, "releases", "boom")
+    r[f"/repos/{OWNER}/proj/traffic/popular/referrers"] = GitHubError(403, "referrers", "nope")
+    cfg = Config(token="x", owner=OWNER, db_path=Path(":memory:"))
+    assert Collector(cfg, conn, FakeGitHub(r), now=DAY0).run() == 2
+    # Day 1: first successful import must not report the whole download count or old referrers.
+    day1 = DAY0 + timedelta(days=1)
+    assert run(conn, day1, downloads=16) == 0
+    assert events(conn) == []
+    # Day 2: real changes are reported again.
+    run(conn, day1 + timedelta(days=1), downloads=18, referrers=("google.com", "reddit.com"))
+    assert sorted(e["type"] for e in events(conn)) == ["download", "referrer"]
+
+
+def test_crash_after_discovery_is_still_a_baseline(conn):
+    # A run that stops right after discovery leaves known repos but no collected sections.
+    cfg = Config(token="x", owner=OWNER, db_path=Path(":memory:"))
+    Collector(cfg, conn, FakeGitHub(routes(DAY0)), now=DAY0).discover()
+    run(conn, DAY0, stars=["bob"], downloads=16)
+    assert events(conn) == []
+
+
+def test_existing_database_is_seeded_from_last_clean_run(conn):
+    run(conn, DAY0, downloads=3)
+    conn.execute("DELETE FROM baselines")  # as before baselines were tracked
+    conn.commit()
+    run(conn, DAY0 + timedelta(days=1), downloads=5)
+    assert [e["detail"] for e in events(conn)] == ["⬇️ +2 proj.apk v1.0.0"]
+
+
+def test_stargazer_list_after_counts_only_is_a_baseline(conn):
+    r = routes(DAY0, stars=["bob", "eve"])
+    r[f"/repos/{OWNER}/proj/stargazers"] = GitHubError(403, "stargazers", "Forbidden")
+    cfg = Config(token="x", owner=OWNER, db_path=Path(":memory:"))
+    Collector(cfg, conn, FakeGitHub(r), now=DAY0).run()
+    # A stars token is added later: the first full list must not report every past stargazer.
+    run(conn, DAY0 + timedelta(days=1), stars=["bob", "eve"])
+    assert events(conn) == []
