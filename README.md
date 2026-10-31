@@ -14,7 +14,8 @@ RepoWatch snapshots everything once a day into SQLite, so you get:
 - **A "what's new" feed**: new stars (and who), forks, watchers, issues/PRs/comments from
   people other than you, new downloads, first visitors from a new site, traffic spikes,
   newly published repos.
-- **One overview** of all repos, plus a per-repo detail page. Works on a phone.
+- **A dashboard you can read at a glance**: four totals with the change vs the previous
+  period, then where it happened, then the details. Works on a phone, light and dark.
 
 ## How it works
 
@@ -33,8 +34,10 @@ cron (daily) ──▶ repowatch collect ──▶ GitHub REST API
 - Traffic arrives as a 14-day series and is upserted per `(repo, date)`: re-runs never
   duplicate and up to 14 missed days are recovered automatically.
 - Each section of each repo is collected independently: one failure doesn't stop the run.
-- The first time a repo is seen its existing history is imported as a baseline, without
-  flooding the feed with "new star" events.
+- The first successful collection of each section of a repo imports its existing history as
+  a baseline, without flooding the feed with "new star" events. This holds per section, so a
+  first run that crashed or a section that failed (e.g. a missing token permission) doesn't
+  dump the whole history into the feed once it starts working.
 
 ## Setup
 
@@ -88,6 +91,36 @@ A run uses roughly 12 requests per repo plus one per new CI run, well within the
 
 GitHub traffic days are UTC; the latest day is partial until it ends and is refreshed on the next run.
 
+### Dashboard
+
+Pick a period (7d, 14d, 30d, 90d, All) at the top right; every number follows it.
+
+**Overview**, in reading order:
+
+1. **Four totals across all repos**: unique visitors, new stars, downloads (new release-asset
+   downloads plus PyPI) and external activity (issues, PRs and comments from people other than
+   you, bots excluded). Each shows the change vs the previous period of the same length:
+   green for gains, grey with ↓ for drops (a quiet week isn't an alarm).
+2. **What's new**: unseen events grouped by repo, one glyph per type (★ star, ⑂ fork,
+   ↓ download, ↗ new referrer, ▲ traffic spike, + new repo, ◉ watcher). Issues (!), PRs (⇄)
+   and comments (“) are blue: they may need a reply. Mark events as seen one by one or all
+   at once; past events stay in History.
+3. **Repositories by activity**: three numbers per repo (visitors, new stars, downloads) with
+   their change. Repos with nothing in the period are folded into a *Quiet* group.
+
+**Repo detail**: stars, visitors, downloads and clones with their change; one large visits
+chart; clones vs CI checkouts, cumulative stars, downloads per asset and PyPI downloads (only
+if configured); referring sites, popular pages, every referrer seen, releases and external
+activity in tabs (an accordion on a phone).
+
+The change vs the previous period appears once the database covers that whole window: with a
+14-day period, data back to 28 days ago. The first run imports 14 days of traffic, so visitor
+changes show up after about two weeks of daily runs; stars and downloads start counting from
+the first run, so theirs take the full 28 days. Until then the tiles say "no earlier data to
+compare". "All" shows totals without comparison.
+
+The design mockup is in `docs/design/repowatch-redesign.html`.
+
 ### Dashboard deployment
 
 `repowatch serve` binds to `127.0.0.1` by default. To reach it from outside either:
@@ -117,6 +150,7 @@ Set `PYPI_PACKAGES=repo:package,...` to also store daily downloads from
 | `ci_runs` (+ view `ci_daily`) | Actions runs, jobs and jobs using `actions/checkout` |
 | `pypi_daily` | PyPI downloads per day |
 | `events` | the "what's new" feed |
+| `baselines` | sections already collected once per repo (see "How it works") |
 | `collector_runs` | run log |
 
 It's plain SQLite: query it directly for anything the dashboard doesn't show.
