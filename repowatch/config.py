@@ -42,12 +42,22 @@ class Config:
     spike_min_uniques: int = 5
     dashboard_user: str | None = None
     dashboard_password: str | None = None
+    dashboard_auth: str = "basic"
     api_url: str = "https://api.github.com"
     stars_token: str | None = None
     backup_dir: Path = Path("data/backups")
     backup_keep_daily: int = 7
     backup_keep_weekly: int = 4
     backup_keep_monthly: int = 6
+
+    def validate_dashboard_auth(self) -> None:
+        if self.dashboard_auth not in {"basic", "external"}:
+            raise ValueError("DASHBOARD_AUTH must be 'basic' or 'external'")
+        if self.dashboard_auth == "basic":
+            if not self.dashboard_user or not self.dashboard_password:
+                raise ValueError("DASHBOARD_AUTH=basic requires DASHBOARD_USER and DASHBOARD_PASSWORD")
+            if ":" in self.dashboard_user:
+                raise ValueError("DASHBOARD_USER cannot contain ':'")
 
     @classmethod
     def from_env(cls, env_file: str | Path | None = None) -> "Config":
@@ -65,6 +75,7 @@ class Config:
             spike_min_uniques=int(os.environ.get("SPIKE_MIN_UNIQUES", "5")),
             dashboard_user=os.environ.get("DASHBOARD_USER") or None,
             dashboard_password=os.environ.get("DASHBOARD_PASSWORD") or None,
+            dashboard_auth=os.environ.get("DASHBOARD_AUTH", "basic").strip().lower(),
             api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
             stars_token=os.environ.get("GITHUB_STARS_TOKEN") or None,
             backup_dir=Path(os.environ.get("REPOWATCH_BACKUP_DIR", "data/backups")),

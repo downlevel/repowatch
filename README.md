@@ -42,7 +42,30 @@ cron (daily) ──▶ repowatch collect ──▶ GitHub REST API
 
 ## Setup
 
-Requires Python 3.11+.
+Use Docker Engine with the Compose plugin, or Python 3.11+ for a manual installation.
+
+### Docker Compose (recommended)
+
+```bash
+git clone https://github.com/downlevel/repowatch.git
+cd repowatch
+cp .env.example .env
+```
+
+Set `GITHUB_OWNER`, `GITHUB_TOKEN`, `DASHBOARD_USER` and `DASHBOARD_PASSWORD` in `.env`, then:
+
+```bash
+docker compose up -d --build
+```
+
+Open **http://127.0.0.1:8765** and sign in with the dashboard credentials. Collection starts
+automatically and repeats every six hours; history persists in a named Docker volume.
+No TeleLogin account or external login service is required.
+
+See [self-hosting instructions](docs/self-hosting.md) for authentication modes, HTTPS,
+backups, upgrades and troubleshooting.
+
+### Manual installation
 
 ```bash
 git clone https://github.com/downlevel/repowatch.git
@@ -135,11 +158,15 @@ The design mockup is in `docs/design/repowatch-redesign.html`.
 
 ### Dashboard deployment
 
-`repowatch serve` binds to `127.0.0.1` by default. To reach it from outside either:
+`repowatch serve` binds to `127.0.0.1` by default. Choose authentication explicitly:
 
-- set `DASHBOARD_USER` / `DASHBOARD_PASSWORD` (built-in HTTP basic auth), and/or
-- put it behind a reverse proxy with authentication (see `deploy/nginx.conf.example`;
-  the UI uses relative URLs, so it works under a sub-path).
+- `DASHBOARD_AUTH=basic` (default): both `DASHBOARD_USER` and `DASHBOARD_PASSWORD` are
+  required. Missing credentials prevent startup; the dashboard and all APIs are protected.
+- `DASHBOARD_AUTH=external`: authentication is handled by your existing reverse proxy.
+  Protect every path and restrict direct backend access. TeleLogin is optional.
+
+Use HTTPS for remote access. The UI works under a URL prefix; see
+`deploy/nginx.conf.example` and the [self-hosting guide](docs/self-hosting.md).
 
 A systemd unit is in `deploy/repowatch-web.service`.
 

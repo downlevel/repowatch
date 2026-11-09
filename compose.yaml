@@ -1,0 +1,78 @@
+name: repowatch
+
+x-app: &app
+  build: .
+  image: ${REPOWATCH_IMAGE:-repowatch:local}
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  volumes:
+    - repowatch-data:/data
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-collection-environment: &collection-environment
+  GITHUB_OWNER: ${GITHUB_OWNER:?Set GITHUB_OWNER in .env}
+  GITHUB_TOKEN: ${GITHUB_TOKEN:?Set GITHUB_TOKEN in .env}
+  GITHUB_STARS_TOKEN: ${GITHUB_STARS_TOKEN:-}
+  GITHUB_API_URL: ${GITHUB_API_URL:-https://api.github.com}
+  INCLUDE_FORKS: ${INCLUDE_FORKS:-false}
+  INCLUDE_ARCHIVED: ${INCLUDE_ARCHIVED:-true}
+  EXCLUDE_REPOS: ${EXCLUDE_REPOS:-}
+  PYPI_PACKAGES: ${PYPI_PACKAGES:-}
+  CI_JOBS: ${CI_JOBS:-true}
+  SPIKE_FACTOR: ${SPIKE_FACTOR:-3}
+  SPIKE_MIN_UNIQUES: ${SPIKE_MIN_UNIQUES:-5}
+  COLLECT_INTERVAL_SECONDS: ${COLLECT_INTERVAL_SECONDS:-21600}
+
+services:
+  web:
+    <<: *app
+    restart: unless-stopped
+    ports:
+      - "${REPOWATCH_BIND:-127.0.0.1}:${REPOWATCH_PORT:-8765}:8765"
+    environment:
+      GITHUB_OWNER: ${GITHUB_OWNER:?Set GITHUB_OWNER in .env}
+      DASHBOARD_AUTH: ${DASHBOARD_AUTH:-basic}
+      DASHBOARD_USER: ${DASHBOARD_USER:-}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+
+  collector:
+    <<: *app
+    restart: unless-stopped
+    command: [collect-loop]
+    environment: *collection-environment
+    healthcheck:
+      disable: true
+    depends_on:
+      web:
+        condition: service_healthy
+    stop_grace_period: 60s
+
+  collect:
+    <<: *app
+    profiles: [tools]
+    command: [collect]
+    environment: *collection-environment
+    healthcheck:
+      disable: true
+
+  backup:
+    <<: *app
+    profiles: [tools]
+    command: [backup, --apply]
+    environment:
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-6}
+    healthcheck:
+      disable: true
+
+volumes:
+  repowatch-data:

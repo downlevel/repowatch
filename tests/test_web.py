@@ -1,4 +1,5 @@
 import base64
+import pytest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from tests.test_collector import OWNER, FakeGitHub, routes
 def make_client(tmp_path: Path, **cfg_kw) -> TestClient:
     from repowatch.web import create_app
 
+    cfg_kw.setdefault("dashboard_auth", "external")
     cfg = Config(token="x", owner=OWNER, db_path=tmp_path / "w.db", **cfg_kw)
     conn = db.connect(cfg.db_path)
     now = datetime.now(timezone.utc)
@@ -71,10 +73,33 @@ def test_previous_period(tmp_path):
 
 
 def test_basic_auth(tmp_path):
-    client = make_client(tmp_path, dashboard_user="u", dashboard_password="p")
+    client = make_client(tmp_path, dashboard_auth="basic", dashboard_user="u", dashboard_password="p")
     assert client.get("/api/status").status_code == 401
     token = base64.b64encode(b"u:p").decode()
     assert client.get("/api/status", headers={"Authorization": f"Basic {token}"}).status_code == 200
+    for path in ("/", "/app.js", "/api/trends", "/api/repo/proj"):
+        assert client.get(path).status_code == 401
+    assert client.post("/api/events/seen", json={"all": True}).status_code == 401
+    for header in ("Basic !!!", "Basic /w==", "Bearer abc"):
+        assert client.get("/api/status", headers={"Authorization": header}).status_code == 401
+
+
+@pytest.mark.parametrize("options", [
+    {}, {"dashboard_user": "u"}, {"dashboard_password": "p"},
+    {"dashboard_auth": "none"},
+    {"dashboard_user": "u:p", "dashboard_password": "p"},
+])
+def test_dashboard_fails_closed(tmp_path, options):
+    from repowatch.web import create_app
+
+    with pytest.raises(ValueError):
+        create_app(Config(token="x", owner=OWNER, db_path=tmp_path / "absent.db", **options))
+    assert not (tmp_path / "absent.db").exists()
+
+
+def test_external_auth_is_explicit(tmp_path):
+    client = make_client(tmp_path, dashboard_auth="external")
+    assert client.get("/api/status").status_code == 200
 
 
 def test_complete_utc_windows_and_missing_days(tmp_path, monkeypatch):

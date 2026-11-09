@@ -1,5 +1,8 @@
-# Inside an existing server { } block (HTTPS). Either rely on DASHBOARD_USER/PASSWORD
-# or add nginx basic auth here (htpasswd -c /etc/nginx/.htpasswd-repowatch you).
+# Inside an existing server { } block (HTTPS).
+# Default: DASHBOARD_AUTH=basic with DASHBOARD_USER/PASSWORD in RepoWatch.
+# For proxy-managed authentication, explicitly set DASHBOARD_AUTH=external and
+# enable auth_basic below (htpasswd -c /etc/nginx/.htpasswd-repowatch you), or
+# configure your existing authentication provider for this entire location.
 location /repowatch/ {
     # auth_basic "RepoWatch";
     # auth_basic_user_file /etc/nginx/.htpasswd-repowatch;

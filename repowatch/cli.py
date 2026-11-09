@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sqlite3
 import sys
 
@@ -20,6 +21,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("collect", help="fetch today's data from GitHub (run daily from cron)")
+    loop = sub.add_parser("collect-loop", help="collect immediately and periodically, without cron")
+    loop.add_argument("--interval-seconds", type=int, help="default: COLLECT_INTERVAL_SECONDS, or 21600")
 
     serve = sub.add_parser("serve", help="run the dashboard")
     serve.add_argument("--host", default="127.0.0.1")
@@ -40,6 +43,22 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "collect":
         return collect(cfg)
+    if args.command == "collect-loop":
+        try:
+            interval = args.interval_seconds if args.interval_seconds is not None else int(
+                os.environ.get("COLLECT_INTERVAL_SECONDS", "21600")
+            )
+        except ValueError:
+            logging.getLogger("repowatch").error("COLLECT_INTERVAL_SECONDS must be an integer >= 60")
+            return 1
+        if not cfg.token or not cfg.owner or interval < 60:
+            logging.getLogger("repowatch").error(
+                "collect-loop requires GITHUB_TOKEN, GITHUB_OWNER and COLLECT_INTERVAL_SECONDS >= 60"
+            )
+            return 1
+        from .scheduler import run
+
+        return run(lambda: collect(cfg), interval)
     if args.command == "backup":
         return run_backup(cfg, apply=args.apply, rotate_only=args.rotate_only, list_only=args.list)
     return serve_dashboard(cfg, args.host, args.port)
@@ -93,10 +112,13 @@ def serve_dashboard(cfg: Config, host: str, port: int) -> int:
 
     from .web import create_app
 
-    if host not in ("127.0.0.1", "localhost", "::1") and not (cfg.dashboard_user and cfg.dashboard_password):
-        logging.getLogger("repowatch").warning(
-            "dashboard exposed on %s without DASHBOARD_USER/DASHBOARD_PASSWORD", host
-        )
+    try:
+        cfg.validate_dashboard_auth()
+    except ValueError as exc:
+        logging.getLogger("repowatch").error("dashboard configuration: %s", exc)
+        return 1
+    if cfg.dashboard_auth == "external":
+        logging.getLogger("repowatch").info("external authentication: protect the dashboard with your reverse proxy")
     uvicorn.run(create_app(cfg), host=host, port=port, log_level="warning")
     return 0
 

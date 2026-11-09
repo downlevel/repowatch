@@ -24,6 +24,7 @@ TOP_ASSETS = 8
 
 
 def create_app(cfg: Config) -> FastAPI:
+    cfg.validate_dashboard_auth()
     app = FastAPI(title="RepoWatch", docs_url=None, redoc_url=None, openapi_url=None)
 
     # Make sure the schema exists even before the first collector run.
@@ -37,7 +38,7 @@ def create_app(cfg: Config) -> FastAPI:
         finally:
             c.close()
 
-    if cfg.dashboard_user and cfg.dashboard_password:
+    if cfg.dashboard_auth == "basic":
         expected = f"{cfg.dashboard_user}:{cfg.dashboard_password}".encode()
 
         @app.middleware("http")
@@ -46,7 +47,7 @@ def create_app(cfg: Config) -> FastAPI:
             ok = False
             if header.lower().startswith("basic "):
                 try:
-                    ok = secrets.compare_digest(base64.b64decode(header[6:]), expected)
+                    ok = secrets.compare_digest(base64.b64decode(header[6:], validate=True), expected)
                 except ValueError:
                     ok = False
             if not ok:

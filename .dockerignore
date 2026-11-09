@@ -1,0 +1,14 @@
+# Only application sources enter the build context. No Git history, credentials or data.
+**
+!pyproject.toml
+!README.md
+!LICENSE
+!repowatch/
+!repowatch/*.py
+!repowatch/static/
+!repowatch/static/**
+**/__pycache__/
+**/*.pyc
+**/.env*
+**/*.db
+**/*.db-*
