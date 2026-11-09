@@ -26,12 +26,19 @@ def test_summary_and_detail(tmp_path):
     summary = client.get("/api/summary?days=14").json()
     assert summary[0]["name"] == "proj"
     assert summary[0]["downloads"] == 3
-    assert summary[0]["views_uniques"] == 14
+    assert summary[0]["views_uniques"] == 13
     detail = client.get("/api/repo/proj?days=30").json()
-    assert detail["traffic"][-1]["ci_checkout_jobs"] == 1
-    assert detail["stars"] == [{"date": "2026-09-01", "stars": 1}]
+    assert detail["traffic"][0]["views"] is None
+    assert detail["traffic"][-1]["ci_checkout_jobs"] is None
+    assert detail["traffic"][-1]["date"] == (date.today() - timedelta(days=1)).isoformat()
+    assert detail["stars"] == [{"date": datetime.now(timezone.utc).date().isoformat(), "stars": 1}]
     assert client.get("/api/repo/nope").status_code == 404
     assert client.get("/").status_code == 200
+    trends = client.get("/api/trends?days=7").json()
+    assert len(trends["dates"]) == 7
+    assert trends["repository_count"] == 1
+    assert trends["totals"][-1]["visitors"] == 1
+    assert client.get("/api/trends?days=-1").status_code == 422
 
 
 def test_previous_period(tmp_path):
@@ -52,14 +59,15 @@ def test_previous_period(tmp_path):
     conn.commit()
     conn.close()
 
-    # Window [today-14, today-7): the fixture's days 13..8 back, one unique each.
-    assert client.get("/api/summary?days=7").json()[0]["prev"]["views_uniques"] == 6
+    # The missing day 14 back leaves a gap in the previous 7-day window.
+    assert client.get("/api/summary?days=7").json()[0]["prev"]["views_uniques"] is None
     prev = client.get("/api/summary?days=14").json()[0]["prev"]
     assert prev["views_uniques"] == 14  # backfilled days 28..15 back
-    assert prev["downloads_delta"] == 130  # counter 15 days back (150) minus 28 days back (20)
+    assert prev["downloads_delta"] == 140  # last counter before end (150) minus last before start (10)
     detail = client.get("/api/repo/proj?days=14").json()
     assert detail["prev"]["views_uniques"] == 14
-    assert detail["period"]["views_uniques"] == 14
+    assert detail["period"]["views_uniques"] == 13
+    assert detail["period"]["coverage"]["traffic"] == {"observed_days": 13, "expected_days": 14, "complete": False}
 
 
 def test_basic_auth(tmp_path):
@@ -67,3 +75,60 @@ def test_basic_auth(tmp_path):
     assert client.get("/api/status").status_code == 401
     token = base64.b64encode(b"u:p").decode()
     assert client.get("/api/status", headers={"Authorization": f"Basic {token}"}).status_code == 200
+
+
+def test_complete_utc_windows_and_missing_days(tmp_path, monkeypatch):
+    import repowatch.web as web
+
+    monkeypatch.setattr(web, "_today", lambda: date(2026, 11, 8))
+    assert web._cutoff(7) == "2026-11-01"
+    assert web._prev_cutoff(7) == "2026-10-25"
+    c = db.connect(tmp_path / "coverage.db")
+    for day in range(25, 32):
+        c.execute("INSERT INTO traffic_daily (repo, date, views_uniques) VALUES ('proj', ?, 0)", (f"2026-10-{day}",))
+    # An observed zero counts as coverage; an absent row does not.
+    complete = web._period(c, "proj", "2026-10-25", "2026-11-01")
+    assert complete["views_uniques"] == 0
+    assert complete["coverage"]["traffic"]["complete"] is True
+    c.execute("DELETE FROM traffic_daily WHERE date='2026-10-28'")
+    incomplete = web._period(c, "proj", "2026-10-25", "2026-11-01")
+    assert incomplete["views_uniques"] is None
+    assert incomplete["coverage"]["traffic"]["observed_days"] == 6
+    c.execute("INSERT INTO traffic_daily (repo, date, views_uniques) VALUES ('proj', '2026-11-08', 999)")
+    assert web._period(c, "proj", "2026-11-01")["views_uniques"] is None
+    c.close()
+
+
+def test_star_counter_loss_and_exclusive_boundary(tmp_path, monkeypatch):
+    import repowatch.web as web
+
+    monkeypatch.setattr(web, "_today", lambda: date(2026, 11, 8))
+    c = db.connect(tmp_path / "stars.db")
+    for day, stars in (("2026-10-31", 10), ("2026-11-07", 8), ("2026-11-08", 100)):
+        c.execute("INSERT INTO repo_snapshots (repo, date, stars, forks, watchers, open_issues) VALUES ('proj', ?, ?, 0, 0, 0)", (day, stars))
+    assert web._stars_delta(c, "proj", "2026-11-01") == -2
+    assert web._stars_delta(c, "proj", "2026-10-25", "2026-11-01") is None
+    c.close()
+
+
+def test_latest_release_total_is_distinct_from_period_increase(tmp_path, monkeypatch):
+    import repowatch.web as web
+
+    monkeypatch.setattr(web, "_today", lambda: date(2026, 11, 8))
+    client = make_client(tmp_path)
+    c = db.connect(tmp_path / "w.db")
+    c.execute("DELETE FROM release_asset_snapshots WHERE repo='proj'")
+    for day, count in (("2026-10-30", 6), ("2026-11-07", 501), ("2026-11-08", 672)):
+        c.execute("INSERT INTO release_asset_snapshots VALUES ('proj', ?, 'v1.0.0', 'app.apk', ?)", (day, count))
+        c.execute("INSERT INTO release_asset_snapshots VALUES ('proj', ?, 'v1.0.0', 'legacy.apk', 5)", (day,))
+    c.commit()
+    c.close()
+
+    for days in (7, 14, 0):
+        summary = client.get(f"/api/summary?days={days}").json()[0]
+        assert summary["downloads"] == 677
+        assert summary["downloads_as_of"] == "2026-11-08"
+        assert summary["downloads_delta"] == 495  # 506 through yesterday minus initial 11.
+        detail = client.get(f"/api/repo/proj?days={days}").json()
+        assert detail["release_downloads"] == {"total": 677, "as_of": "2026-11-08"}
+        assert detail["period"]["downloads_delta"] == 495

@@ -2,20 +2,21 @@
 
 Daily history of the GitHub metrics that GitHub itself forgets: stars, traffic, clones,
 referrers and release downloads for **every public repo of an account**, plus a small
-self-hosted dashboard that tells you whether *real people* are finding and using your projects.
+self-hosted dashboard for understanding interest in your projects.
 
 GitHub only shows totals (stars, download counts) or a rolling 14-day window (traffic).
 RepoWatch snapshots everything once a day into SQLite, so you get:
 
 - **History beyond 14 days** for views, unique visitors, clones and referrers.
-- **Deltas from cumulative counters**: new stars and new release downloads per day/asset.
-- **Clones next to CI checkouts**: every GitHub Actions job using `actions/checkout`
-  is a clone, so raw clone counts are mostly noise. RepoWatch counts them so you can tell.
+- **Observed counter changes**: net star balance, including losses, and release download trends.
+- **Clones next to observed CI activity**: checkout estimates from job step names provide
+  context for automated activity; the difference does not measure human clones.
 - **A "what's new" feed**: new stars (and who), forks, watchers, issues/PRs/comments from
   people other than you, new downloads, first visitors from a new site, traffic spikes,
   newly published repos.
-- **A dashboard you can read at a glance**: four totals with the change vs the previous
-  period, then where it happened, then the details. Works on a phone, light and dark.
+- **A dashboard you can read at a glance**: totals, selectable daily trends, sparklines,
+  referring sites and a searchable, sortable repository table. Works on a phone with
+  system, light and dark themes.
 
 ## How it works
 
@@ -93,31 +94,42 @@ GitHub traffic days are UTC; the latest day is partial until it ends and is refr
 
 ### Dashboard
 
-Pick a period (7d, 14d, 30d, 90d, All) at the top right; every number follows it.
+Pick a period (7d, 14d, 30d, 90d, All). Period metrics use complete UTC days;
+today is excluded because it is partial. Choose System, Light or Dark at the top;
+the dashboard remembers the theme and period in your browser.
 
 **Overview**, in reading order:
 
-1. **Four totals across all repos**: unique visitors, new stars, downloads (new release-asset
-   downloads plus PyPI) and external activity (issues, PRs and comments from people other than
-   you, bots excluded). Each shows the change vs the previous period of the same length:
-   green for gains, grey with ↓ for drops (a quiet week isn't an alarm).
-2. **What's new**: unseen events grouped by repo, one glyph per type (★ star, ⑂ fork,
-   ↓ download, ↗ new referrer, ▲ traffic spike, + new repo, ◉ watcher). Issues (!), PRs (⇄)
-   and comments (“) are blue: they may need a reply. Mark events as seen one by one or all
-   at once; past events stay in History.
-3. **Repositories by activity**: three numbers per repo (visitors, new stars, downloads) with
-   their change. Repos with nothing in the period are folded into a *Quiet* group.
+1. **Four totals across current repositories**: summed daily unique visitors, net star
+   balance, downloads (observed release counter changes plus PyPI) and external activity
+   (issues, PRs and comments from other people, bots excluded). Comparisons use repositories
+   with comparable observations; the caption states when this is a subset.
+2. **Overall trend**: switch between visitors, star balance, release downloads and PyPI.
+   Daily totals sum available observations; the tooltip reports the contributing repository
+   count. Missing days break the line. Daily counter changes require consecutive observations.
+   Deleted release assets and reset download counters leave gaps rather than negative downloads.
+3. **Referring sites**: bars use each repository's latest 14-day GitHub snapshot. This block
+   is independent of the period selector, shows snapshot dates and never sums overlapping snapshots.
+4. **Repositories**: search names and descriptions, filter archived repositories, recorded
+   inactivity or incomplete traffic, and sort by name or a metric using the column headers.
+   The release total shows cumulative GitHub downloads at the latest snapshot (including today
+   when available); the period column shows observed increases through yesterday plus PyPI,
+   excluding the initial baseline. Sparklines follow the trend metric. Traffic coverage appears under each name. On a phone,
+   use the sort selector and scroll the table horizontally to see all metrics.
+5. **What's new**: unseen events grouped by repository. Mark them seen individually or
+   together; past events stay in History. This feed tracks unseen events, independent of the
+   period selector.
 
-**Repo detail**: stars, visitors, downloads and clones with their change; one large visits
-chart; clones vs CI checkouts, cumulative stars, downloads per asset and PyPI downloads (only
-if configured); referring sites, popular pages, every referrer seen, releases and external
-activity in tabs (an accordion on a phone).
+**Repo detail**: totals, visits, clones and observed CI checkouts, historical star counters,
+asset downloads and PyPI, plus referring sites, popular pages, releases and external activity.
+Snapshot and cumulative sections state their own windows rather than implying that every
+value is a flow in the selected period.
 
-The change vs the previous period appears once the database covers that whole window: with a
-14-day period, data back to 28 days ago. The first run imports 14 days of traffic, so visitor
-changes show up after about two weeks of daily runs; stars and downloads start counting from
-the first run, so theirs take the full 28 days. Until then the tiles say "no earlier data to
-compare". "All" shows totals without comparison.
+Missing observations are distinct from zero. Traffic and PyPI comparisons require full daily
+coverage in the previous window; current incomplete daily coverage suppresses those comparisons.
+Coverage counts stored dates and does not certify that every collector section succeeded.
+Release counters and star balances can cover only the observations available since tracking
+began. "All" displays the stored history without a previous-period comparison.
 
 The design mockup is in `docs/design/repowatch-redesign.html`.
 

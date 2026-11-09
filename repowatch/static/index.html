@@ -4,6 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RepoWatch</title>
+  <script>
+    try {
+      const theme = localStorage.getItem("repowatch.theme");
+      if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+    } catch (_) { /* Use the system theme when storage is unavailable. */ }
+  </script>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%232a78d6'/></svg>">
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -14,12 +20,16 @@
       <a href="#/" class="brand">RepoWatch<span class="slash">/</span><span id="owner"></span></a>
       <p id="status" class="meta"></p>
     </div>
-    <div class="period" role="group" aria-label="Period">
+    <div class="header-controls"><div class="period" role="group" aria-label="Period">
       <button data-days="7">7d</button>
       <button data-days="14">14d</button>
       <button data-days="30">30d</button>
       <button data-days="90">90d</button>
       <button data-days="0">All</button>
+    </div>
+      <label class="select-label theme-control"><span class="sr-only">Color theme</span><select id="theme" aria-label="Color theme">
+        <option value="system">System theme</option><option value="light">Light theme</option><option value="dark">Dark theme</option>
+      </select></label>
     </div>
   </header>
   <main id="view"></main>
