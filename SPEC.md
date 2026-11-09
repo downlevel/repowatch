@@ -1,4 +1,7 @@
-# RepoWatch — specification
+# RepoWatch — original design notes
+
+This document records the early design. For the current beta scope, permissions and
+installation instructions, see [README](README.md) and [architecture](docs/architecture.md).
 
 Daily monitoring of all public repositories of a GitHub account, with history over time and a dashboard.
 

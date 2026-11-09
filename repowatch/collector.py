@@ -247,7 +247,7 @@ class Collector:
             if not self.stargazers_denied:
                 log.warning(
                     "cannot list stargazers (%s): falling back to star counts without names. "
-                    "GitHub restricts that list to tokens with write access, see GITHUB_STARS_TOKEN.",
+                    "Check the endpoint access requirements; GITHUB_STARS_TOKEN can supply a separate token.",
                     exc,
                 )
                 self.stargazers_denied = True

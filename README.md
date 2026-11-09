@@ -1,50 +1,51 @@
 # RepoWatch
 
-Daily history of the GitHub metrics that GitHub itself forgets: stars, traffic, clones,
-referrers and release downloads for **every public repo of an account**, plus a small
-self-hosted dashboard for understanding interest in your projects.
+[![CI](https://github.com/downlevel/repowatch/actions/workflows/ci.yml/badge.svg)](https://github.com/downlevel/repowatch/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-GitHub only shows totals (stars, download counts) or a rolling 14-day window (traffic).
-RepoWatch snapshots everything once a day into SQLite, so you get:
+**Self-hosted GitHub analytics for your own projects.** Keep daily traffic history beyond
+GitHub's rolling 14-day window, track star balances and release downloads, and see what
+changed across your public repositories in one dashboard.
 
-- **History beyond 14 days** for views, unique visitors, clones and referrers.
-- **Observed counter changes**: net star balance, including losses, and release download trends.
-- **Clones next to observed CI activity**: checkout estimates from job step names provide
-  context for automated activity; the difference does not measure human clones.
-- **A "what's new" feed**: new stars (and who), forks, watchers, issues/PRs/comments from
-  people other than you, new downloads, first visitors from a new site, traffic spikes,
-  newly published repos.
-- **A dashboard you can read at a glance**: totals, selectable daily trends, sparklines,
-  referring sites and a searchable, sortable repository table. Works on a phone with
-  system, light and dark themes.
+![RepoWatch overview with synthetic demonstration data](docs/screenshots/overview-light.png)
 
-## How it works
+*Screenshot uses fictional projects and synthetic data. [Dark theme](docs/screenshots/overview-dark.png)
+· [Mobile view](docs/screenshots/overview-mobile.png).*
 
-```
-cron (daily) ──▶ repowatch collect ──▶ GitHub REST API
-                        │
-                        ▼
-                 data/repowatch.db (SQLite)
-                        │
-                        ▼
-          repowatch serve (FastAPI + static page with Chart.js)
-```
+RepoWatch is an open-source application you run on your server, for **one GitHub account
+per installation**. No signup service or TeleLogin account is required.
+This is the first public beta; feedback and reproducible bug reports are welcome.
 
-- Repos are discovered on every run (`GET /users/{owner}/repos`): no hardcoded list.
-  Forks are excluded by default.
-- Traffic arrives as a 14-day series and is upserted per `(repo, date)`: re-runs never
-  duplicate and up to 14 missed days are recovered automatically.
-- Each section of each repo is collected independently: one failure doesn't stop the run.
-- The first successful collection of each section of a repo imports its existing history as
-  a baseline, without flooding the feed with "new star" events. This holds per section, so a
-  first run that crashed or a section that failed (e.g. a missing token permission) doesn't
-  dump the whole history into the feed once it starts working.
+## What it does
 
-## Setup
+- Stores daily views, daily unique visitors and clones in SQLite, retaining observations
+  after they disappear from GitHub's traffic window.
+- Tracks observed star balances, release-asset download counters and optional PyPI downloads.
+- Shows an account overview, selectable daily trends, repository sparklines, referring sites,
+  search, sorting and filters. Works on desktop and mobile, with light and dark themes.
+- Surfaces new stars where names are available, forks, downloads, traffic spikes and
+  issues/PRs/comments from people other than the owner, excluding recognised bots.
+- Runs collection automatically with Docker Compose. A failed section does not stop the
+  remaining sections; logs and the dashboard report collection status.
+- Supports built-in Basic authentication or your existing authentication proxy.
 
-Use Docker Engine with the Compose plugin, or Python 3.11+ for a manual installation.
+## Before installing
 
-### Docker Compose (recommended)
+- **Public repositories only**, belonging to the configured user or organisation. Forks
+  are excluded by default; repository access and filters are configurable.
+- **Traffic needs appropriate access to the repository**, not just knowledge of its name.
+  RepoWatch cannot retrieve traffic for arbitrary third-party projects.
+- The first collection can import GitHub's available **14 days of traffic**. Older traffic
+  cannot be recovered; retention beyond that starts with your own stored observations.
+- Star/download changes need subsequent snapshots. Short history and missing observations
+  can mean no trend or no previous-period comparison yet.
+- **Release total and period increase are different values.** The latest cumulative release
+  total can include today; period counts and daily trends exclude today's partial UTC day.
+
+## Quick start: Docker Compose
+
+Requires Docker Engine with the Compose plugin. The image is built locally from source;
+there is no registry account to configure.
 
 ```bash
 git clone https://github.com/downlevel/repowatch.git
@@ -52,180 +53,129 @@ cd repowatch
 cp .env.example .env
 ```
 
-Set `GITHUB_OWNER`, `GITHUB_TOKEN`, `DASHBOARD_USER` and `DASHBOARD_PASSWORD` in `.env`, then:
+Edit `.env` before starting:
+
+| Variable | What to enter |
+| --- | --- |
+| `GITHUB_OWNER` | Your GitHub username or organisation |
+| `GITHUB_TOKEN` | A token with access to those repositories; see below |
+| `DASHBOARD_USER` | Your dashboard login name |
+| `DASHBOARD_PASSWORD` | Your own long, unique dashboard password |
+
+Leave `DASHBOARD_AUTH=basic` for the built-in login. A GitHub token is not the dashboard
+password. For passwords containing `$` or `#`, single-quote the value in `.env`.
 
 ```bash
 docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 collector
 ```
 
-Open **http://127.0.0.1:8765** and sign in with the dashboard credentials. Collection starts
-automatically and repeats every six hours; history persists in a named Docker volume.
-No TeleLogin account or external login service is required.
+Open **http://127.0.0.1:8765** and enter your dashboard credentials in the browser prompt.
+The collector starts after the dashboard is healthy, collects immediately, then waits six
+hours between runs. No host cron is needed for Docker. Data persists in a named volume.
 
-See [self-hosting instructions](docs/self-hosting.md) for authentication modes, HTTPS,
-backups, upgrades and troubleshooting.
+The published port binds to **loopback** by default. On a remote server, use an HTTPS
+reverse proxy or an SSH tunnel; `127.0.0.1` in your laptop's browser is your laptop, not
+that server. Set `REPOWATCH_PORT` if the default port is already occupied.
 
-### Manual installation
+[Full Docker guide: authentication, remote access, updates, backups and troubleshooting](docs/self-hosting.md).
+For Python without Docker, use the separate [manual installation guide](docs/manual-installation.md).
+
+## GitHub access
+
+Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new)
+for the account you monitor, granting access to all intended repositories or selecting them
+explicitly. Discovery still lists public repositories; use `EXCLUDE_REPOS` to skip
+repositories outside your token access. Start with **Administration: read** for traffic and **Metadata: read**.
+Your GitHub identity must also have the repository access required by the traffic API;
+setting a token permission does not grant access your account lacks.
+[GitHub traffic API documentation](https://docs.github.com/en/rest/metrics/traffic).
+
+RepoWatch uses read requests; do not grant write access just to obtain traffic or star
+counts. If a section returns an access error, inspect the collector logs and that endpoint's
+permissions. A token may also need organisation approval before it can access its repositories.
+
+**Stargazer names are optional.** RepoWatch attempts the listing with the main token, or
+with `GITHUB_STARS_TOKEN` when explicitly configured. If access is denied, it falls back
+to daily star counters without names. GitHub documents listing restrictions for admins and
+collaborators and more than one accepted permission set, including Metadata read; write
+access is not an unconditional requirement. Check the
+[current endpoint documentation](https://docs.github.com/en/rest/activity/starring#list-stargazers)
+before changing permissions. A separate token is used only for the stargazer listing.
+
+Keep `.env` private and out of Git. The Docker dashboard container does not receive the
+GitHub token; the collector does. Optional PyPI collection contacts pypistats.org.
+
+## Reading the numbers
+
+| Display | Meaning |
+| --- | --- |
+| Visitors | Sum of daily unique visitors, also summed across repositories; not distinct people over the whole period |
+| Star balance | Net change in observed star counters, including losses |
+| Release total | Cumulative GitHub asset downloads at the latest snapshot, across releases; separate from PyPI |
+| In-period downloads | Observed release counter increase plus PyPI downloads through yesterday; excludes the initial baseline when tracking began inside the period |
+| Referring sites / popular pages | GitHub's top entries from the latest 14-day snapshots; independent of the period selector |
+| External activity | Recorded issues, PRs and conversation comments from other people, excluding recognised bots |
+| CI checkouts | An estimate from workflow job step names; the difference from clone counts does not measure human users |
+
+Periods use complete **UTC days**. Missing observations are distinct from zero. Daily trend
+tooltips report how many repositories contribute; changing coverage can change the aggregate.
+The table shows per-repository traffic coverage. Comparisons identify when only a subset
+of repositories is comparable. Coverage counts stored dates, not successful collection of
+every individual source. Unseen events in the feed are independent of the selected period.
+
+Asset counts include files such as checksums and signatures. In daily release trends,
+deleted assets and reset counters leave gaps. Period counter differences can still be affected
+by changes in the asset inventory; they are observed changes, not a measure of distinct installs.
+A download, clone or visit does not establish a human user or prove attribution to a launch.
+
+## Backups and upgrades
+
+Your SQLite history is the durable record; GitHub cannot reconstruct old traffic. For Docker:
 
 ```bash
-git clone https://github.com/downlevel/repowatch.git
-cd repowatch
-python -m venv .venv && .venv/bin/pip install -e .
-cp .env.example .env   # then edit it
+docker compose run --rm backup
+docker compose run --rm backup backup --list
 ```
 
-### GitHub token
+Backups are verified compressed SQLite copies in the data volume. Keep a copy outside that
+volume too. Docker backups are manual unless you schedule them on your server.
+`docker compose down` preserves the volume; adding `-v` deletes it and its history.
 
-Create a **fine-grained personal access token** (Settings → Developer settings → Fine-grained tokens):
+The [Docker operations guide](docs/self-hosting.md#operations) includes export, verified
+restore and update commands. For a Python installation, use the
+[manual backup/restore instructions](docs/manual-installation.md#backups-and-restore).
+Stop web and collector processes before restoring; do not overwrite a running SQLite database
+with a raw decompression command.
 
-- Resource owner: the account to monitor
-- Repository access: *All repositories* (or the ones you want)
-- Repository permissions: **Administration: read-only** (needed for traffic) and
-  **Metadata: read-only** (default).
-- Nothing else.
+## Beta scope and feedback
 
-**Who starred your repos.** Since July 2026 GitHub limits the stargazers list
-(`GET /repos/{o}/{r}/stargazers`) to repository admins and collaborators: a fine-grained token
-needs **Contents: read and write**, a classic token the `public_repo` scope. That's write access,
-which a read-only tool shouldn't need, so by default RepoWatch detects new stars from the daily
-counter ("+2 stars on repo"), without names. If you want names and dates and accept the
-trade-off, put a separate write-capable token in `GITHUB_STARS_TOKEN`: it is used for that
-endpoint only.
+Supported deployment: Docker on Linux, or Python 3.11+ on Linux with collection scheduled
+by you. This beta has one configured GitHub account and one dashboard credential pair per
+installation. There is no multi-user hosting service, launch annotation feature or public
+interactive demo yet. Charts currently load Chart.js from jsDelivr, so the browser needs
+access to that CDN as well as the dashboard.
 
-Put it in `.env` as `GITHUB_TOKEN`, together with `GITHUB_OWNER`. Traffic endpoints only
-work for repos you have admin access to, so you can monitor your own account or an
-organisation you administer. See `.env.example` for all options.
-
-### First run
-
-```bash
-.venv/bin/repowatch collect     # imports the last 14 days of traffic right away
-.venv/bin/repowatch serve       # http://127.0.0.1:8765
-```
-
-Exit codes of `collect`: `0` ok, `2` some sections failed (see the log), `1` fatal error.
-A run uses roughly 12 requests per repo plus one per new CI run, well within the
-5,000 requests/hour limit.
-
-### Daily schedule
-
-```cron
-0 6 * * * cd /opt/repowatch && .venv/bin/repowatch collect >> /var/log/repowatch.log 2>&1
-```
-
-GitHub traffic days are UTC; the latest day is partial until it ends and is refreshed on the next run.
-
-### Dashboard
-
-Pick a period (7d, 14d, 30d, 90d, All). Period metrics use complete UTC days;
-today is excluded because it is partial. Choose System, Light or Dark at the top;
-the dashboard remembers the theme and period in your browser.
-
-**Overview**, in reading order:
-
-1. **Four totals across current repositories**: summed daily unique visitors, net star
-   balance, downloads (observed release counter changes plus PyPI) and external activity
-   (issues, PRs and comments from other people, bots excluded). Comparisons use repositories
-   with comparable observations; the caption states when this is a subset.
-2. **Overall trend**: switch between visitors, star balance, release downloads and PyPI.
-   Daily totals sum available observations; the tooltip reports the contributing repository
-   count. Missing days break the line. Daily counter changes require consecutive observations.
-   Deleted release assets and reset download counters leave gaps rather than negative downloads.
-3. **Referring sites**: bars use each repository's latest 14-day GitHub snapshot. This block
-   is independent of the period selector, shows snapshot dates and never sums overlapping snapshots.
-4. **Repositories**: search names and descriptions, filter archived repositories, recorded
-   inactivity or incomplete traffic, and sort by name or a metric using the column headers.
-   The release total shows cumulative GitHub downloads at the latest snapshot (including today
-   when available); the period column shows observed increases through yesterday plus PyPI,
-   excluding the initial baseline. Sparklines follow the trend metric. Traffic coverage appears under each name. On a phone,
-   use the sort selector and scroll the table horizontally to see all metrics.
-5. **What's new**: unseen events grouped by repository. Mark them seen individually or
-   together; past events stay in History. This feed tracks unseen events, independent of the
-   period selector.
-
-**Repo detail**: totals, visits, clones and observed CI checkouts, historical star counters,
-asset downloads and PyPI, plus referring sites, popular pages, releases and external activity.
-Snapshot and cumulative sections state their own windows rather than implying that every
-value is a flow in the selected period.
-
-Missing observations are distinct from zero. Traffic and PyPI comparisons require full daily
-coverage in the previous window; current incomplete daily coverage suppresses those comparisons.
-Coverage counts stored dates and does not certify that every collector section succeeded.
-Release counters and star balances can cover only the observations available since tracking
-began. "All" displays the stored history without a previous-period comparison.
-
-The design mockup is in `docs/design/repowatch-redesign.html`.
-
-### Dashboard deployment
-
-`repowatch serve` binds to `127.0.0.1` by default. Choose authentication explicitly:
-
-- `DASHBOARD_AUTH=basic` (default): both `DASHBOARD_USER` and `DASHBOARD_PASSWORD` are
-  required. Missing credentials prevent startup; the dashboard and all APIs are protected.
-- `DASHBOARD_AUTH=external`: authentication is handled by your existing reverse proxy.
-  Protect every path and restrict direct backend access. TeleLogin is optional.
-
-Use HTTPS for remote access. The UI works under a URL prefix; see
-`deploy/nginx.conf.example` and the [self-hosting guide](docs/self-hosting.md).
-
-A systemd unit is in `deploy/repowatch-web.service`.
-
-### Backups (optional)
-
-GitHub only serves 14 days of traffic, so the database can't be rebuilt once lost.
-`repowatch backup` writes a compressed copy to `data/backups/` using SQLite's online backup
-API, re-reads it to verify it, and only then rotates old copies: all from the last 7 days,
-then one per week for 4 weeks and one per month for 6 months (`BACKUP_KEEP_*`).
-
-```bash
-repowatch backup --apply        # copy and rotate (without --apply rotation is a dry run)
-repowatch backup --rotate-only  # show what rotation would remove
-repowatch backup --list
-gunzip -c data/backups/repowatch-<timestamp>.db.gz > data/repowatch.db   # restore
-```
-
-`deploy/repowatch-backup.*` runs this nightly; `deploy/repowatch-backup-r2.*` then uploads the
-copies to Cloudflare R2 with `rclone copy --immutable`, which never deletes anything remotely
-(set your remote and bucket in the unit, and expire old copies with a bucket lifecycle rule).
-
-### PyPI downloads (optional)
-
-Set `PYPI_PACKAGES=repo:package,...` to also store daily downloads from
-[pypistats.org](https://pypistats.org) (without mirrors).
-
-## Data model
-
-| Table | Content |
-|---|---|
-| `repos` | discovered repos, `first_seen` / `last_seen` |
-| `repo_snapshots` | daily stars, forks, watchers, open issues |
-| `traffic_daily` | views, unique visitors, clones, unique cloners per day |
-| `referrers_snapshots`, `paths_snapshots` | daily snapshot of GitHub's 14-day top 10 |
-| `releases`, `release_asset_snapshots` | releases and daily cumulative download count per asset |
-| `stargazers`, `forks` | who starred / forked, and when |
-| `activity` | issues, PRs and comments, flagged owner / bot |
-| `ci_runs` (+ view `ci_daily`) | Actions runs, jobs and jobs using `actions/checkout` |
-| `pypi_daily` | PyPI downloads per day |
-| `events` | the "what's new" feed |
-| `baselines` | sections already collected once per repo (see "How it works") |
-| `collector_runs` | run log |
-
-It's plain SQLite: query it directly for anything the dashboard doesn't show.
-
-## Caveats
-
-- "Unique visitors" over a period is the sum of daily uniques (GitHub doesn't expose
-  uniques over arbitrary windows), so a person visiting on two days counts twice.
-- Referrers and popular pages are GitHub's top 10 only.
-- Watchers are reported as a count; GitHub doesn't timestamp subscriptions.
+To report a problem, [open an issue](https://github.com/downlevel/repowatch/issues/new) with
+your version, installation method, selected period, expected/actual behaviour and redacted
+collector logs. Never attach a token, password, `.env` or an unredacted private database.
+See the [beta release notes](docs/releases/v0.1.0b1.md) for changes and upgrade requirements.
 
 ## Development
 
 ```bash
+python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
+.venv/bin/python scripts/smoke-compose.py --build
 ```
+
+CI runs tests on Python 3.11–3.13 and a fresh Docker installation against a fake GitHub API,
+including login, collection, persistence and backup/restore. It needs no GitHub credentials.
+The [architecture notes](docs/architecture.md) describe the collector and database.
+To reproduce the documentation images, see [screenshots](docs/screenshots/README.md).
 
 ## License
 
-MIT
+[MIT](LICENSE).

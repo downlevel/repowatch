@@ -1,6 +1,6 @@
 [project]
 name = "repowatch"
-version = "0.1.0"
+version = "0.1.0b1"
 description = "Daily history of GitHub stars, traffic, clones, referrers and release downloads for all public repos of an account, with a small self-hosted dashboard."
 readme = "README.md"
 license = { text = "MIT" }
