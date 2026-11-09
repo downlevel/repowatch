@@ -1,0 +1,18 @@
+[Unit]
+Description=RepoWatch database backup
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/repowatch
+# --apply is what authorises deletions: without it rotation only reports what it would do.
+ExecStart=/opt/repowatch/.venv/bin/repowatch backup --apply
+
+# Reads the database (in WAL mode even reads touch -shm) and writes copies to data/backups.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/opt/repowatch/data
+
+Nice=15
+IOSchedulingClass=idle

@@ -44,6 +44,10 @@ class Config:
     dashboard_password: str | None = None
     api_url: str = "https://api.github.com"
     stars_token: str | None = None
+    backup_dir: Path = Path("data/backups")
+    backup_keep_daily: int = 7
+    backup_keep_weekly: int = 4
+    backup_keep_monthly: int = 6
 
     @classmethod
     def from_env(cls, env_file: str | Path | None = None) -> "Config":
@@ -63,4 +67,8 @@ class Config:
             dashboard_password=os.environ.get("DASHBOARD_PASSWORD") or None,
             api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
             stars_token=os.environ.get("GITHUB_STARS_TOKEN") or None,
+            backup_dir=Path(os.environ.get("REPOWATCH_BACKUP_DIR", "data/backups")),
+            backup_keep_daily=int(os.environ.get("BACKUP_KEEP_DAILY", "7")),
+            backup_keep_weekly=int(os.environ.get("BACKUP_KEEP_WEEKLY", "4")),
+            backup_keep_monthly=int(os.environ.get("BACKUP_KEEP_MONTHLY", "6")),
         )

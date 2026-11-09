@@ -131,6 +131,24 @@ The design mockup is in `docs/design/repowatch-redesign.html`.
 
 A systemd unit is in `deploy/repowatch-web.service`.
 
+### Backups (optional)
+
+GitHub only serves 14 days of traffic, so the database can't be rebuilt once lost.
+`repowatch backup` writes a compressed copy to `data/backups/` using SQLite's online backup
+API, re-reads it to verify it, and only then rotates old copies: all from the last 7 days,
+then one per week for 4 weeks and one per month for 6 months (`BACKUP_KEEP_*`).
+
+```bash
+repowatch backup --apply        # copy and rotate (without --apply rotation is a dry run)
+repowatch backup --rotate-only  # show what rotation would remove
+repowatch backup --list
+gunzip -c data/backups/repowatch-<timestamp>.db.gz > data/repowatch.db   # restore
+```
+
+`deploy/repowatch-backup.*` runs this nightly; `deploy/repowatch-backup-r2.*` then uploads the
+copies to Cloudflare R2 with `rclone copy --immutable`, which never deletes anything remotely
+(set your remote and bucket in the unit, and expire old copies with a bucket lifecycle rule).
+
 ### PyPI downloads (optional)
 
 Set `PYPI_PACKAGES=repo:package,...` to also store daily downloads from

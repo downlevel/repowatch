@@ -1,0 +1,12 @@
+[Unit]
+Description=RepoWatch backups to Cloudflare R2
+
+[Timer]
+# After the nightly copy (04:40 + up to 5 minutes). A missed day recovers by itself:
+# each run uploads whatever is missing.
+OnCalendar=*-*-* 05:30:00 UTC
+Persistent=true
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target

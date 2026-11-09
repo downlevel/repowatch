@@ -1,0 +1,11 @@
+[Unit]
+Description=RepoWatch database backup
+
+[Timer]
+OnCalendar=*-*-* 04:40:00 UTC
+# If the machine was off at that time, back up at the next boot.
+Persistent=true
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target

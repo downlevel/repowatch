@@ -1,0 +1,23 @@
+[Unit]
+Description=RepoWatch backups to Cloudflare R2
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# `copy`, not `sync`: uploads new copies and never deletes remotely, so a file lost or
+# damaged here doesn't propagate. Old copies on R2 are removed by a bucket lifecycle rule.
+# --immutable refuses to overwrite an uploaded copy with a different file.
+# Replace `r2:YOUR-BUCKET` with your rclone remote and bucket.
+ExecStart=/usr/bin/rclone copy /opt/repowatch/data/backups \
+          r2:YOUR-BUCKET/repowatch \
+          --include "repowatch-*.db.gz" --immutable -v
+
+# Reads the copies and rclone's config, writes nothing locally.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+
+Nice=15
+IOSchedulingClass=idle

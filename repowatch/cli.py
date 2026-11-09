@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sqlite3
 import sys
 
-from . import db
+from . import backup, db
 from .collector import Collector
 from .config import Config
 from .github import GitHub, GitHubError
@@ -24,6 +25,11 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8765)
 
+    backup_cmd = sub.add_parser("backup", help="make a verified copy of the database and rotate old ones")
+    backup_cmd.add_argument("--apply", action="store_true", help="really delete; without it rotation is a dry run")
+    backup_cmd.add_argument("--rotate-only", action="store_true", help="rotate without making a new copy")
+    backup_cmd.add_argument("--list", action="store_true", help="list the backups and exit")
+
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -34,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "collect":
         return collect(cfg)
+    if args.command == "backup":
+        return run_backup(cfg, apply=args.apply, rotate_only=args.rotate_only, list_only=args.list)
     return serve_dashboard(cfg, args.host, args.port)
 
 
@@ -57,6 +65,27 @@ def collect(cfg: Config) -> int:
         conn.close()
     # Exit code 2 = partial failure, so cron/monitoring can tell it apart from success.
     return 2 if errors else 0
+
+
+def run_backup(cfg: Config, apply: bool, rotate_only: bool, list_only: bool) -> int:
+    if list_only:
+        for item in backup.inventory(cfg.backup_dir):
+            print(f"{item.name}  {backup.format_size(item.size):>10}")
+        return 0
+
+    tiers = backup.Tiers(cfg.backup_keep_daily, cfg.backup_keep_weekly, cfg.backup_keep_monthly)
+    try:
+        if rotate_only:
+            result = backup.rotate(cfg.backup_dir, apply=apply, tiers=tiers)
+        else:
+            _, result = backup.run(cfg.db_path, cfg.backup_dir, apply=apply, tiers=tiers)
+    except (OSError, sqlite3.Error, RuntimeError) as exc:
+        logging.getLogger("repowatch").error("backup failed: %s", exc)
+        return 1
+
+    for item in result.removed:
+        print(f"{'removed' if apply else 'would remove'}: {item.name}")
+    return 1 if result.errors else 0
 
 
 def serve_dashboard(cfg: Config, host: str, port: int) -> int:
