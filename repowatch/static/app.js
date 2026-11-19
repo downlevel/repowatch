@@ -499,7 +499,7 @@ async function renderRepo(name, version) {
       </section>
       <section class="card chart-card">
         <span class="card-title">Downloads by asset</span>
-        ${assets.length ? `<p class="note">Cumulative per asset · last observation in selected period · may include multiple releases</p>
+        ${assets.length ? `<p class="note">Cumulative per asset · latest observation in selected period, including today · may include multiple releases</p>
           <div class="chart-box" style="height:${Math.max(120, assets.length * 30)}px"><canvas id="c-assets"></canvas></div>`
           : noData(d.releases.length ? "No asset downloads in this period." : "No releases yet. Counts appear once a release has assets.")}
       </section>

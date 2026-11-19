@@ -202,7 +202,7 @@ def create_app(cfg: Config) -> FastAPI:
             downloads: dict[str, list] = {k: [] for k in top}
             for r in asset_rows:
                 key = f"{r['tag']} · {r['asset']}"
-                if key in downloads and cutoff <= r["date"] < _today().isoformat():
+                if key in downloads and cutoff <= r["date"]:
                     downloads[key].append({"date": r["date"], "count": r["download_count"]})
 
             releases = [
