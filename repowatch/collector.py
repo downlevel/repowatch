@@ -6,6 +6,7 @@ events. Each section of each repo is isolated, so one failure does not stop the 
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import sqlite3
 import traceback
@@ -308,6 +309,9 @@ class Collector:
                     f.get("html_url"), f.get("created_at"),
                 )
 
+    def _ignored_asset(self, name: str) -> bool:
+        return any(fnmatch.fnmatchcase(name, pattern) for pattern in self.cfg.ignore_release_assets)
+
     def collect_releases(self, repo: str) -> None:
         for rel in self.gh.paginate(f"{self._repo_path(repo)}/releases"):
             if rel.get("draft"):
@@ -326,6 +330,8 @@ class Collector:
             )
             for asset in rel.get("assets", []):
                 name, count = asset["name"], asset["download_count"]
+                if self._ignored_asset(name):
+                    continue
                 prev = self.conn.execute(
                     """
                     SELECT download_count FROM release_asset_snapshots

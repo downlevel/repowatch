@@ -45,6 +45,7 @@ class Config:
     dashboard_auth: str = "basic"
     api_url: str = "https://api.github.com"
     stars_token: str | None = None
+    ignore_release_assets: list[str] = field(default_factory=list)
     backup_dir: Path = Path("data/backups")
     backup_keep_daily: int = 7
     backup_keep_weekly: int = 4
@@ -78,6 +79,7 @@ class Config:
             dashboard_auth=os.environ.get("DASHBOARD_AUTH", "basic").strip().lower(),
             api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
             stars_token=os.environ.get("GITHUB_STARS_TOKEN") or None,
+            ignore_release_assets=_list(os.environ.get("IGNORE_RELEASE_ASSETS")),
             backup_dir=Path(os.environ.get("REPOWATCH_BACKUP_DIR", "data/backups")),
             backup_keep_daily=int(os.environ.get("BACKUP_KEEP_DAILY", "7")),
             backup_keep_weekly=int(os.environ.get("BACKUP_KEEP_WEEKLY", "4")),

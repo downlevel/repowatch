@@ -233,3 +233,12 @@ def test_stargazer_list_after_counts_only_is_a_baseline(conn):
     # A stars token is added later: the first full list must not report every past stargazer.
     run(conn, DAY0 + timedelta(days=1), stars=["bob", "eve"])
     assert events(conn) == []
+
+
+def test_ignored_release_assets_are_not_counted(conn):
+    r = routes(DAY0)
+    r[f"/repos/{OWNER}/proj/releases"][0]["assets"].append({"name": "version.json", "download_count": 40})
+    cfg = Config(token="x", owner=OWNER, db_path=Path(":memory:"), ignore_release_assets=["version.json"])
+    assert Collector(cfg, conn, FakeGitHub(r), now=DAY0).run() == 0
+    assets = [row[0] for row in conn.execute("SELECT asset FROM release_asset_snapshots")]
+    assert assets == ["proj.apk"]

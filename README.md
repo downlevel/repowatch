@@ -125,7 +125,9 @@ The table shows per-repository traffic coverage. Comparisons identify when only 
 of repositories is comparable. Coverage counts stored dates, not successful collection of
 every individual source. Unseen events in the feed are independent of the selected period.
 
-Asset counts include files such as checksums and signatures. In daily release trends,
+Asset counts include files such as checksums and signatures unless they match
+`IGNORE_RELEASE_ASSETS` (comma-separated names or glob patterns, e.g. `version.json,*.sha256`),
+which the collector skips; already stored snapshots are not removed. In daily release trends,
 deleted assets and reset counters leave gaps. Period counter differences can still be affected
 by changes in the asset inventory; they are observed changes, not a measure of distinct installs.
 A download, clone or visit does not establish a human user or prove attribution to a launch.
